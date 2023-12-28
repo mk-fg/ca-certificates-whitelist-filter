@@ -24,6 +24,9 @@ untrustworthy or unnecessary CAs, with always some more in the works,
 so I'd recommend also looking into alternative options for a specific use-case,
 as this is a rather blunt approach.
 
+There is a `"Trimming-down list of trusted TLS ca-certificates" blog post`_
+describing what/how this script is meant to address in a bit more detail.
+
 Repository URLs:
 
 - https://github.com/mk-fg/ca-certificates-whitelist-filter
@@ -34,6 +37,8 @@ Repository URLs:
 .. _Arch: https://gitlab.archlinux.org/archlinux/packaging/packages/ca-certificates
 .. _Fedora: https://src.fedoraproject.org/rpms/ca-certificates/tree/rawhide
 .. _OpenSUSE: https://github.com/openSUSE/ca-certificates
+.. _"Trimming-down list of trusted TLS ca-certificates" blog post:
+  https://blog.fraggod.net/2023/12/28/trimming-down-list-of-trusted-tls-ca-certificates-system-wide-using-a-whitelist-approach.html
 
 
 Usage
@@ -79,7 +84,8 @@ change immediately in old and new tabs, while other apps might also need running
 ``update-ca-trust`` distro script to export those into e.g. ``/etc/ssl/cert.pem``
 for OpenSSL and other libs/tools.
 
-It is intended to be run automatically on linux from a package manager hook like this::
+It is intended to be run automatically on linux from a package manager hook like
+this (Arch Linux pacman hook example)::
 
   [Trigger]
   Operation = Install

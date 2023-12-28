@@ -215,12 +215,10 @@ def main(argv=None):
 		if list_mode: print_ca_conf_list(ca_conf_list)
 
 		if not dry_run: # move all new/backup files into place
-			while tmp_files:
-				p_tmp, p = tmp_files.pop()
-				p_tmp.rename(p)
+			while tmp_files: p_tmp, p = tmp_files.pop(); p_tmp.rename(p)
 
 	finally:
 		if dry_run: tmp_files.clear()
-		for tmp, bak in tmp_files: tmp.unlink(missing_ok=True)
+		for p_tmp, p in tmp_files: p_tmp.unlink(missing_ok=True)
 
 if __name__ == '__main__': sys.exit(main())

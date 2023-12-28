@@ -1,6 +1,5 @@
-ca-certs-whitelist-filter_
-''''''''''''''''''''''''''
-.. _ca-certs-whitelist-filter: ca-certs-whitelist-filter
+ca-certificates-whitelist-filter
+''''''''''''''''''''''''''''''''
 
 Rather simple script to process p11-kit_ Certificate Authority bundles
 for "ca-certificates" package in linux distros, and only leave explicitly
@@ -20,8 +19,19 @@ to be somewhat custom per-distro (e.g. in Arch_, Fedora_, OpenSUSE_),
 so maybe scripts in some of those might not have this issue, and allow
 whitelisting already in their wrapper tools - make sure to check there first.
 
+Note that there are other ways to address the issue of having too many
+untrustworthy or unnecessary CAs, with always some more in the works,
+so I'd recommend also looking into alternative options for a specific use-case,
+as this is a rather blunt approach.
+
+Repository URLs:
+
+- https://github.com/mk-fg/ca-certificates-whitelist-filter
+- https://codeberg.org/mk-fg/ca-certificates-whitelist-filter
+- https://fraggod.net/code/git/ca-certificates-whitelist-filter
+
 .. _p11-kit: https://p11-glue.github.io/p11-glue/
-.. _Arch: https://gitlab.archlinux.org/archlinux/packaging/packages/ca-certificates/-/tree/main
+.. _Arch: https://gitlab.archlinux.org/archlinux/packaging/packages/ca-certificates
 .. _Fedora: https://src.fedoraproject.org/rpms/ca-certificates/tree/rawhide
 .. _OpenSUSE: https://github.com/openSUSE/ca-certificates
 
@@ -30,7 +40,7 @@ Usage
 -----
 
 It is a python 3.8+ script, with an optional dependency on `cryptography.io module`_,
-only used when printing certificate fingerprints and attributes nicely in ``-l/--list``
+only used for printing certificate fingerprints and attributes nicely in ``-l/--list``
 or ``-L/--list-all`` modes.
 
 To work in normal mode, script requires a whitelist file, and changes files in
@@ -65,7 +75,7 @@ Script makes a backup of the original CA bundles, and can be re-run without
 clobbering the backups, to further filter remaining CAs in the produced bundle.
 
 Browsers like firefox use this this bundle dir directly, so should pick up the
-change immediately in new tabs, while other apps might also need running
+change immediately in old and new tabs, while other apps might also need running
 ``update-ca-trust`` distro script to export those into e.g. ``/etc/ssl/cert.pem``
 for OpenSSL and other libs/tools.
 

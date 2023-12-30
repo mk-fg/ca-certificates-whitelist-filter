@@ -41,10 +41,10 @@ def b64_hash(data, n=10, person=b'cacertsw', **b2_kws):
 		digest = hl.blake2s(digest, person=person, **b2_kws).digest()
 
 
-def parse_ca_conf(src, name=None):
+def parse_p11k_conf(src, name=None):
 	p_err_sec = lambda s: p_err(f'ERROR: {src_pre} {s}')
 	sec, props, pem, pem_str = None, dict(), list(), None
-	ca_conf_list = cs.defaultdict(list)
+	p11k_map = cs.defaultdict(list)
 	for n, line in enumerate(it.chain(src, ['[end]']), 1):
 		src_name = name or src.name
 		src_pre = f'[ {src_name}:{n} ]'
@@ -56,7 +56,7 @@ def parse_ca_conf(src, name=None):
 					p_err_sec(f'Skipping {sec} without label :: {str_cut(obj)}')
 				elif pem_str is None:
 					p_err_sec(f'Dropping no-PEM {sec} :: {str_cut(obj)}')
-				else: ca_conf_list[label.strip('"')].append(obj)
+				else: p11k_map[label.strip('"')].append(obj)
 			sec = m[1]; props.clear(); pem.clear(); pem_str = None
 			continue
 		elif sec:
@@ -70,14 +70,31 @@ def parse_ca_conf(src, name=None):
 				pem.append(line); pem_str = ''.join(pem); pem.clear(); continue
 			p_err_sec(f'Unrecognized section line :: {line.strip()}')
 		else: p_err_sec(f'Unrecognized line :: {line.strip()}')
-	return ca_conf_list
+	return p11k_map
 
-def print_ca_conf_list(ca_conf_list):
-	for n, label in enumerate(ca_conf_list, 1):
+def parse_p11k_file(p):
+	with p.open() as src:
+		src_hash = (m := re.fullmatch(
+			r'#.*\[([a-zA-Z0-9]{10})\]', line := src.readline().strip() )) and m[1]
+		if src_hash and src_hash == b64_hash(lines := src.read()):
+			src_is_origin, lines = False, lines.splitlines(keepends=True)
+		else: src.seek(0); src_is_origin, lines = True, src
+		return parse_p11k_conf(lines, p.name), src_is_origin
+
+def print_p11k_map(p11k_map, file=sys.stdout):
+	p = lambda s='': print(s, file=file)
+	for n, obj in enumerate(it.chain.from_iterable(p11k_map.values())):
+		if n: p()
+		p(f'[{obj.sec}]')
+		for k, v in obj.props.items(): p(f'{k}: {v}')
+		p(obj.pem.strip())
+
+def print_ca_info_map(ca_info_map):
+	for n, (label, objs) in enumerate(ca_info_map.items(), 1):
 		print(n, label)
 		if not c_x509: continue
 		certs = list( (obj.pem, obj.conf)
-			for obj in ca_conf_list[label] if 'BEGIN CERTIFICATE' in obj.pem )
+			for obj in objs if 'BEGIN CERTIFICATE' in obj.pem )
 		for pem, conf in certs:
 			pre = f'{conf} ' if len(certs) > 1 else ''
 			cert = c_x509.load_pem_x509_certificate(pem.encode())
@@ -86,14 +103,6 @@ def print_ca_conf_list(ca_conf_list):
 				print(f'   {pre}{alg:<6s} = {fp}')
 			for a in cert.subject: print(f'   {pre}{a.oid._name}: {a.value}')
 			print()
-
-def print_ca_conf_p11k(ca_conf_list, file=sys.stdout):
-	p = lambda s='': print(s, file=file)
-	for n, obj in enumerate(it.chain.from_iterable(ca_conf_list.values())):
-		if n: p()
-		p(f'[{obj.sec}]')
-		for k, v in obj.props.items(): p(f'{k}: {v}')
-		p(obj.pem.strip())
 
 
 def main(argv=None):
@@ -115,7 +124,7 @@ def main(argv=None):
 				where CA PEM bundles are stored in p11-kit ini-like format.
 			All files in the directory will be filtered and replaced.
 			Default: %(default)s'''))
-	parser.add_argument('-w', '--whitelist', nargs='?', help=dd('''
+	parser.add_argument('-w', '--whitelist', metavar='file', help=dd('''
 		List of p11-kit object labels to include in resulting CA bundle, ignoring all others.
 		One per line, case-sensitive, can use shell-glob/fnmatch wildcards.
 		Must be specified for normal filtering mode, but not required for --list-all.'''))
@@ -126,11 +135,12 @@ def main(argv=None):
 	group.add_argument('-b', '--backup-dir', default='backup', metavar='dir', help=dd('''
 		Dir to copy original unprocessed file(s) to,
 			just in case, and to maybe re-process them later.
-		Can be relative to trust-dir. Default: %(default)s'''))
-	group.add_argument('-x', '--exclude-files-re',
+		Can be relative to trust-dir, empty value to disable. Default: %(default)s'''))
+	group.add_argument('-x', '--junk-files-re',
 		default=r'(?i)^(README(\..*)?|\.txt)$', metavar='regexp', help=dd('''
-			Regexp (python re syntax) to match name(s) of files in trust-dir to skip processing.
-			These files will simply be moved into -b/--backup-dir, with their contents ignored.
+			Regexp (python re syntax) to match name(s) of files in trust-dir
+				to discard without processing, such as README and other expected junk.
+			These files are moved into -b/--backup-dir or removed, with their contents ignored.
 			Empty - don't skip anything. Default: %(default)s'''))
 
 	group = parser.add_argument_group('List/print and debug options')
@@ -153,6 +163,7 @@ def main(argv=None):
 		for line in pl.Path(opts.whitelist).read_text().splitlines():
 			if m := re.search(r'(^|\s)#', line): line = line[:m.start()]
 			if pat := line.strip(): whitelist.append(pat)
+	re_fn_junk = re.compile(opts.junk_files_re or '$x')
 
 	ca_lists = list(p for p in pl.Path(opts.trust_dir).iterdir() if p.is_file())
 	if opts.backup_dir:
@@ -160,65 +171,62 @@ def main(argv=None):
 		if not dry_run: bak_dir.mkdir(mode=0o700, exist_ok=True)
 	else: bak_dir = None
 
-	tmp_files = list()
-	try:
-		ca_conf_list = cs.defaultdict(list)
+	ca_info_map = cs.defaultdict(list)
+	if opts.list_all:
 		for p in ca_lists:
-			src_ca_list, src_is_origin = dict(), True
+			if re_fn_junk.search(p.name): continue
+			p11k_map, p_is_origin = parse_p11k_file(p)
+			for label, objs in p11k_map.items(): ca_info_map[label].extend(objs)
+		return print_ca_info_map(ca_info_map)
 
-			if not (rx := opts.exclude_files_re) or not re.search(rx, p.name):
-				with p.open() as src:
-					src_hash = (m := re.fullmatch(
-						r'#.*\[([a-zA-Z0-9]{10})\]', line := src.readline().strip() )) and m[1]
-					if src_hash and src_hash == b64_hash(lines := src.read()):
-						src_is_origin, lines = False, lines.splitlines(keepends=True)
-					else: src.seek(0); lines = src
-					src_ca_list.update(parse_ca_conf(lines, p.name))
-					if not opts.list_all:
-						for label in list(src_ca_list):
-							try: pat = next(pat for pat in whitelist if fnmatch.fnmatchcase(label, pat))
-							except StopIteration: del src_ca_list[label]
-							else: whitelist_used.add(pat)
-					if list_mode:
-						for label, cas in src_ca_list.items(): ca_conf_list[label].extend(cas)
+	tmp_files = list() if not dry_run else None
+	try:
+		for p in ca_lists:
+			if re_fn_junk.search(p.name): # junk files - backed-up or removed
+				if not dry_run: tmp_files.append((p, bak_dir and bak_dir / p.name))
+				continue
 
+			p11k_map, p_is_origin = parse_p11k_file(p)
+			for label in list(p11k_map):
+				try: pat = next(pat for pat in whitelist if fnmatch.fnmatchcase(label, pat))
+				except StopIteration: del p11k_map[label]
+				else: whitelist_used.add(pat)
+
+			if list_mode:
+				for label, objs in p11k_map.items(): ca_info_map[label].extend(objs)
 			if opts.print:
 				print('-'*20, p.name)
-				print_ca_conf_p11k(src_ca_list)
-
+				print_p11k_map(p11k_map)
 			if dry_run:
-				with open(os.devnull, 'w') as null:
-					print_ca_conf_p11k(src_ca_list, null)
+				with open(os.devnull, 'w') as null: print_p11k_map(p11k_map, null)
 				continue
 
-			if not src_ca_list:
-				if bak_dir: tmp_files.append((p, bak_dir / p.name))
-				continue
-
-			if bak_dir and src_is_origin: # don't overwrite original backups
+			if bak_dir and p_is_origin: # don't overwrite original backups
 				shutil.copyfile(p, bak_tmp := pl.Path(
 					str(bak := bak_dir / f'{p.name}') + '.old' ))
 				tmp_files.append((bak_tmp, bak))
+			if not p11k_map: continue # don't create empty files
 			with (p_tmp := (bak_dir or p.parent) / f'{p.name}.new').open('w+') as tmp:
 				tmp_files.append((p_tmp, p))
 				tmp.write( line := '## Generated by'
 					f' ca-certs-whitelist-filter from {p.name} [{b64_hash("")}]\n' )
 				pos_hash, pos_data = line.rfind('[') + 1, tmp.tell()
-				tmp.write('\n'); print_ca_conf_p11k(src_ca_list, tmp)
+				tmp.write('\n'); print_p11k_map(p11k_map, tmp)
 				tmp.seek(pos_data); src_hash = b64_hash(tmp.read())
 				tmp.seek(pos_hash); tmp.write(src_hash)
 
-		if not (opts.list_all or opts.quiet):
+		if not opts.quiet:
 			for pat in set(whitelist).difference(whitelist_used):
 				p_err(f'WARNING: Whitelist-pattern did not match anything [ {pat} ]')
+		if list_mode: print_ca_info_map(ca_info_map)
+		if dry_run: return
 
-		if list_mode: print_ca_conf_list(ca_conf_list)
-
-		if not dry_run: # move all new/backup files into place
-			while tmp_files: p_tmp, p = tmp_files.pop(); p_tmp.rename(p)
+		while tmp_files: # move all new/backup files into place
+			p_tmp, p = tmp_files.pop()
+			if p: p_tmp.rename(p)
+			else: p_tmp.unlink(missing_ok=True)
 
 	finally:
-		if dry_run: tmp_files.clear()
-		for p_tmp, p in tmp_files: p_tmp.unlink(missing_ok=True)
+		for p_tmp, p in tmp_files or list(): p_tmp.unlink(missing_ok=True)
 
 if __name__ == '__main__': sys.exit(main())

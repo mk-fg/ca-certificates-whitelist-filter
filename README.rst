@@ -24,8 +24,8 @@ untrustworthy or unnecessary CAs, with always some more in the works,
 so I'd recommend also looking into alternative options for a specific use-case,
 as this is a rather blunt approach.
 
-There is a `"Trimming-down list of trusted TLS ca-certificates" blog post`_
-describing what/how this script is meant to address in a bit more detail.
+Related `"Trimming-down list of trusted TLS ca-certificates" blog post`_
+goes into a bit more detail of what this script is meant to do.
 
 Repository URLs:
 
@@ -46,7 +46,7 @@ Usage
 
 It is a python 3.8+ script, with an optional dependency on `cryptography.io module`_,
 only used for printing certificate fingerprints and attributes nicely in ``-l/--list``
-or ``-L/--list-all`` modes.
+or ``-L/--list-all`` modes (will be simply omitted without the module).
 
 To work in normal mode, script requires a whitelist file, and changes files in
 "ca-certificates/trust-source" directory (``/usr/share/ca-certificates/trust-source/``
@@ -79,8 +79,8 @@ To actually do the filtering, script should be run with ``-w/--whitelist`` optio
 Script makes a backup of the original CA bundles, and can be re-run without
 clobbering the backups, to further filter remaining CAs in the produced bundle.
 
-Browsers like firefox use this this bundle dir directly, so should pick up the
-change immediately in old and new tabs, while other apps might also need running
+Browsers like firefox use this bundle dir directly, so should pick the change
+up immediately in both old and new tabs, while other apps might also need running
 ``update-ca-trust`` distro script to export those into e.g. ``/etc/ssl/cert.pem``
 for OpenSSL and other libs/tools.
 
